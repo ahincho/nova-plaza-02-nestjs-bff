@@ -1,0 +1,34 @@
+{
+  "name": "plaza-bff",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PlazaBff, sobre la plataforma Nova",
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "packageManager": "pnpm@11.24.0",
+  "engines": {
+    "node": ">=24.15"
+  },
+  "scripts": {
+    "build": "nova build",
+    "start": "nova start",
+    "start:dev": "nova start --watch",
+    "start:prod": "node dist/main",
+    "test": "nova test",
+    "test:cov": "nova test:cov",
+    "typecheck": "nova typecheck",
+    "docker": "nova docker",
+    "lint": "nova lint",
+    "lint:arch": "nova lint:arch",
+    "format": "nova format",
+    "format:check": "nova format:check",
+    "verify": "nova verify"
+  },
+  "dependencies": {
+    "@ahincho/nova-nestjs": "^0.16.1"
+  },
+  "devDependencies": {
+    "@ahincho/nova-nestjs-schematics": "^0.16.1",
+    "@ahincho/nova-nestjs-toolchain": "^0.16.1"
+  }
+}

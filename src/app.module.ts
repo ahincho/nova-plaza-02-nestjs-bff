@@ -1,0 +1,35 @@
+import { Module } from '@nestjs/common';
+import { NovaModule } from '@ahincho/nova-nestjs';
+import { PurchasesModule } from './features/purchases/purchases.module';
+
+@Module({
+  imports: [
+    NovaModule.forRoot({
+      // Cada upstream declarado con `defineUpstream()` va acá. Si su variable
+      // de URL no está inyectada, el servicio no arranca y el error la nombra.
+      config: { load: [] },
+
+      health: {
+        // Tras SIGTERM el servicio sigue vivo esta ventana y termina lo que
+        // tenga en vuelo; `ready` contesta 503 mientras tanto.
+        //
+        // No es esto lo que saca la tarea de rotación: ECS desregistra el
+        // target y espera el deregistration delay ANTES de mandar la señal,
+        // así que cuando el proceso se entera ya no le llega tráfico. Esta
+        // ventana existe para que no se corte una petición a la mitad.
+        //
+        // Menor que el stopTimeout de la tarea -30 s por defecto-, porque
+        // pasado ese plazo llega un SIGKILL a mitad del drenaje.
+        gracefulShutdownTimeoutMs: 5000,
+
+        // Un chequeo de disponibilidad mira lo que el servicio necesita para
+        // atender, y **no llama al upstream**: si `ready` cayera cuando un
+        // upstream se cae, el orquestador mataría tareas sanas por un problema
+        // que no es suyo.
+        readinessChecks: [],
+      },
+    }),
+    PurchasesModule,
+  ],
+})
+export class AppModule {}

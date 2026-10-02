@@ -1,0 +1,99 @@
+import { setupOpenApi } from '@ahincho/nova-nestjs';
+import { Test } from '@nestjs/testing';
+import request from 'supertest';
+import { AppModule } from '../src/app.module';
+import type { INestApplication } from '@nestjs/common';
+import type { App } from 'supertest/types';
+
+/**
+ * El test con el que nace el servicio.
+ *
+ * Prueba lo único que hay el primer día, que igual es lo que más cuesta cuando
+ * se rompe: que el módulo levanta, que las sondas contestan donde el
+ * balanceador las busca y que el documento OpenAPI se puede generar. Un
+ * despliegue muere por una sonda movida mucho antes que por una regla de
+ * negocio.
+ */
+describe('PlazaBff', () => {
+  let app: INestApplication;
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+
+    app = moduleRef.createNestApplication();
+
+    // El test no pasa por `bootstrap()`, así que la documentación se monta acá.
+    // Vale la pena: generar el documento recorre los decoradores de todos los
+    // controladores, y un `@ApiProperty` mal puesto revienta ahí y no en la
+    // primera visita a /docs.
+    setupOpenApi(app, { title: 'PlazaBff', bearerAuth: false });
+
+    await app.init();
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  // Vive y disponible no son lo mismo: la primera dice que el proceso responde,
+  // la segunda que puede atender. Si `live` mirara dependencias, el orquestador
+  // reiniciaría el contenedor por una caída que no es suya.
+  it('answers the liveness probe without touching dependencies', async () => {
+    const response = await request(app.getHttpServer() as App)
+      .get('/health/live')
+      .expect(200);
+
+    expect(response.body).toMatchObject({ status: 'ok' });
+  });
+
+  it('answers the readiness probe', async () => {
+    const response = await request(app.getHttpServer() as App)
+      .get('/health/ready')
+      .expect(200);
+
+    expect(response.body).toMatchObject({ status: 'ok' });
+  });
+
+  // Las sondas quedan fuera del prefijo global a propósito: moverlas es mover
+  // el target group, y una sonda que responde 404 desregistra la tarea unos
+  // nueve segundos después de registrarla.
+  it('keeps the probes outside the global prefix', async () => {
+    await request(app.getHttpServer() as App)
+      .get('/api/v1/health/live')
+      .expect(404);
+  });
+
+  it('serves an OpenAPI document', async () => {
+    const response = await request(app.getHttpServer() as App)
+      .get('/docs/json')
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      info: { title: 'PlazaBff' },
+    });
+  });
+
+  // Que el documento se sirva no alcanza: un DTO declarado como `type` no deja
+  // metadatos y el endpoint sale sin esquema, con el documento igual de verde.
+  // Esto mira que la respuesta esté descrita como el sobre envolviendo al DTO,
+  // que es lo que sale por el cable.
+  it('describes the response as the envelope wrapping the dto', async () => {
+    const response = await request(app.getHttpServer() as App).get(
+      '/docs/json',
+    );
+    const document = response.body as {
+      components: { schemas: Record<string, unknown> };
+      paths: Record<string, unknown>;
+    };
+
+    expect(document.components.schemas).toHaveProperty('PurchasesResponse');
+    expect(JSON.stringify(document.paths)).toContain(
+      '#/components/schemas/ApiEnvelopeSchema',
+    );
+    expect(JSON.stringify(document.paths)).toContain(
+      '#/components/schemas/PurchasesResponse',
+    );
+  });
+});
