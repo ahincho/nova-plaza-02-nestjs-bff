@@ -96,7 +96,12 @@ jobs:
           # Sin --rm a propósito. Con esa bandera un contenedor que muere al
           # arrancar se borra solo, y el `docker logs` de más abajo -que es lo
           # único que explica por qué murió- contesta «No such container».
-          id=$(docker run --detach --env NODE_ENV=development --publish 3000:3000 "plaza-bff:ci")
+          # Las URL de los servicios y el emisor tienen que existir para que el BFF
+          # arranque; la sonda `live` no llama a ninguno.
+          id=$(docker run --detach --env NODE_ENV=development --env PORT=3000 \
+            --env CATALOG_URL=http://localhost:8082 --env ORDERS_URL=http://localhost:8081 \
+            --env PAYMENTS_URL=http://localhost:8083 --env KEYCLOAK_ISSUER=http://localhost:8180/realms/plaza \
+            --publish 3000:3000 "plaza-bff:ci")
           trap 'docker rm --force "$id" > /dev/null 2>&1 || true' EXIT
 
           for attempt in $(seq 1 30); do

@@ -11,6 +11,9 @@ importers:
       '@ahincho/nova-nestjs':
         specifier: ^0.16.1
         version: 0.16.1(supports-color@7.2.0)(typescript@6.0.3)
+      jose:
+        specifier: ^6.2.12
+        version: 6.2.12
     devDependencies:
       '@ahincho/nova-nestjs-schematics':
         specifier: ^0.16.1
@@ -1252,6 +1255,9 @@ packages:
   iterare@1.2.1:
     resolution: {integrity: sha512-RKYVTCjAnRthyJes037NX/IiqeidgN1xc3j1RjFfECFp28A1GVwK9nA+i0rJPaHqSZwygLzRnFlzUuHFoWWy+Q==}
     engines: {node: '>=6'}
+
+  jose@6.2.12:
+    resolution: {integrity: sha512-9NiFmJEex0sy2Dk58j2UGBSHgUs2ypF9eZSu4L6vjOX3Dp96Sw1F3uL+H+D1sx02jZZdzUT0HgvCy59CuvXcWw==}
 
   joycon@3.1.1:
     resolution: {integrity: sha512-34wB/Y7MW7bzjKRjUKTa46I2Z7eV62Rkhva+KkopW7Qvv/OSWBqvkSY7vusOPrNuZcUG3tApvdVgNB8POj3SPw==}
@@ -3042,6 +3048,8 @@ snapshots:
   is-unicode-supported@2.1.0: {}
 
   iterare@1.2.1: {}
+
+  jose@6.2.12: {}
 
   joycon@3.1.1: {}
 

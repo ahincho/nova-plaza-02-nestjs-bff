@@ -1,36 +1,56 @@
-import { Controller, Get, Inject, Query } from '@nestjs/common';
-import { ApiEnvelope, ApiErrors } from '@ahincho/nova-nestjs';
-import { PurchasesQuery } from './dto/purchases-query.dto';
-import { PurchasesResponse } from './dto/purchases.response';
 import {
-  GET_PURCHASES_USE_CASE,
-  type GetPurchasesUseCase,
-} from './port/in/get-purchases.use-case';
+  Body,
+  Controller,
+  Headers,
+  HttpCode,
+  HttpStatus,
+  Inject,
+  Post,
+} from '@nestjs/common';
+import { ApiEnvelope, ApiErrors, ApplicationError } from '@ahincho/nova-nestjs';
+import { PurchaseRequest } from './dto/purchase.request';
+import { PurchaseResponse, toPurchaseResponse } from './dto/purchase.response';
+import {
+  PLACE_PURCHASE_USE_CASE,
+  type PlacePurchaseUseCase,
+} from './port/in/place-purchase.use-case';
+
+/** La clave con la que el cliente puede repetir una compra sin comprar dos veces. */
+export const IDEMPOTENCY_HEADER = 'idempotency-key';
 
 @Controller('purchases')
 export class PurchasesController {
-  /**
-   * Depende del puerto de entrada y no de la clase del servicio. El controlador
-   * es un adaptador: si nombra la implementación, el borde queda atado al
-   * núcleo y ya no se puede cambiar uno sin el otro.
-   */
   constructor(
-    @Inject(GET_PURCHASES_USE_CASE)
-    private readonly purchases: GetPurchasesUseCase,
+    @Inject(PLACE_PURCHASE_USE_CASE)
+    private readonly purchases: PlacePurchaseUseCase,
   ) {}
 
   /**
-   * Devuelve la respuesta pelada: el sobre lo pone el interceptor global de la
-   * plataforma. El DTO del query lo valida el pipe global, y un campo que no
-   * esté declarado ahí se rechaza en vez de ignorarse en silencio.
-   *
-   * `ApiEnvelope` describe lo que sale por el cable, que no es lo que devuelve
-   * este método: el interceptor lo envuelve después.
+   * Compra el carrito del cliente que inició sesión. Sin stock, 409
+   * `OUT_OF_STOCK`; con el pago rechazado, 422 `PAYMENT_DECLINED`; en los dos
+   * casos el BFF ya deshizo lo que había hecho.
    */
-  @Get()
-  @ApiEnvelope(PurchasesResponse, { isArray: true })
-  @ApiErrors(400)
-  list(@Query() query: PurchasesQuery): Promise<PurchasesResponse[]> {
-    return this.purchases.list(query);
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  @ApiEnvelope(PurchaseResponse, { status: 201, description: 'La compra' })
+  @ApiErrors(400, 401, 404, 409, 422)
+  async purchase(
+    @Headers(IDEMPOTENCY_HEADER) idempotencyKey: string | undefined,
+    @Body() request: PurchaseRequest,
+  ): Promise<PurchaseResponse> {
+    if (idempotencyKey === undefined || idempotencyKey.trim() === '') {
+      throw ApplicationError.invalidInput('La solicitud no es válida', [
+        {
+          field: 'Idempotency-Key',
+          message:
+            'La compra necesita una clave para poder repetirse sin cobrar dos veces',
+        },
+      ]);
+    }
+    const purchase = await this.purchases.execute(
+      idempotencyKey.trim(),
+      request.items.map((item) => ({ sku: item.sku, quantity: item.quantity })),
+    );
+    return toPurchaseResponse(purchase);
   }
 }

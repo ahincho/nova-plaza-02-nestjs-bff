@@ -1,47 +1,41 @@
 import { appEnvironment, bootstrap } from '@ahincho/nova-nestjs';
 import { AppModule } from './app.module';
 
+/**
+ * El puerto del BFF en Plaza cuando nadie inyecta `PORT`. El 3000 por defecto
+ * de la plataforma queda para Grafana en la máquina de desarrollo.
+ */
+const PLAZA_PORT = 8080;
+
 // El main.ts completo. El ValidationPipe con la fábrica del sobre, el bind a
-// 0.0.0.0, el puerto leído de PORT, el logger estructurado, los hooks de
-// apagado, el 503 mientras se cierra y la exclusión de las sondas del prefijo
-// global los pone bootstrap(); nada de eso se copia por servicio.
+// 0.0.0.0, el logger estructurado, los hooks de apagado, el 503 mientras se
+// cierra y la exclusión de las sondas del prefijo global los pone bootstrap();
+// nada de eso se copia por servicio.
 //
-// Las convenciones de la organización -otra variable de puerto, el prefijo de
-// sus secretos- no se escriben acá: van en su perfil, que se pasa como
-// `profile` a bootstrap() y a NovaModule.forRoot().
-//
-// **Una sola imagen para los tres ambientes.** Nada de dev, qa ni prod se
-// decide al construir: todo llega por variable de entorno, que es lo que
-// inyecta la task definition. El artefacto que se aprobó en dev es el que llega
-// a prod.
+// **Una sola imagen para los tres ambientes.** Nada se decide al construir:
+// todo llega por variable de entorno, que es lo que inyecta la task definition.
 void bootstrap(AppModule, {
-  globalPrefix: 'api/v1',
+  // `/v1/purchases`, como `/v1/orders`, `/v1/products` y `/v1/payments` en los
+  // servicios: toda Plaza responde con el mismo prefijo.
+  globalPrefix: 'v1',
+  ...(process.env['PORT'] === undefined ? { port: PLAZA_PORT } : {}),
   cors: { origins: process.env['CORS_ALLOWED_ORIGINS'] ?? '' },
 
-  // Una task definition que inyecta un secreto de Secrets Manager entero lo
-  // pone en UNA sola variable con el JSON completo, así que desdoblarlo es de
-  // la aplicación.
-  //
-  // No lleva ninguna lista: con el perfil de la organización descubre sus
-  // secretos por su prefijo, y `NOVA_SECRETS` puede nombrar en tiempo de
-  // ejecución el que no lo siga. Agregar un secreto no toca este archivo.
+  // El BFF no guarda credenciales: el token se valida con las claves públicas
+  // de Keycloak. Si alguna vez necesita un secreto, llega igual que en pagos.
   secrets: true,
 
   openapi: {
     title: 'PlazaBff',
+    description: 'La entrada de Plaza: el catálogo, los pedidos y la compra',
 
-    // La interfaz queda en /docs y el documento en /docs/json, fuera del
-    // prefijo global: cambiar de v1 a v2 no debería mover el enlace que la
-    // gente tiene guardado.
-    //
-    // `appEnvironment()` lee NODE_ENV, que es lo que inyecta la task
-    // definition. Sin inyectar nada cae en `production`, el más restrictivo:
-    // un contenedor que nadie configuró no publica la documentación.
+    // `appEnvironment()` lee NODE_ENV. Sin inyectar nada cae en `production`,
+    // el más restrictivo: un contenedor que nadie configuró no publica la
+    // documentación.
     enabled: appEnvironment() !== 'production',
 
-    // En false porque este servicio nace sin `auth`. Al declarar
-    // `NovaModule.forRoot({ auth: ... })` hay que sacarlo: el guard es global,
-    // así que el documento tiene que decir que todo pide token.
-    bearerAuth: false,
+    // El guard es global: el documento dice que todo pide token, salvo lo que
+    // es `@Public()`.
+    bearerAuth: true,
   },
 });

@@ -1,99 +1,181 @@
-import { setupOpenApi } from '@ahincho/nova-nestjs';
+import { setupOpenApi, validationExceptionFactory } from '@ahincho/nova-nestjs';
+import { ValidationPipe, type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
-import { AppModule } from '../src/app.module';
-import type { INestApplication } from '@nestjs/common';
 import type { App } from 'supertest/types';
+import { AppModule } from '../src/app.module';
+import { FakePlaza } from './fake-plaza';
 
 /**
- * El test con el que nace el servicio.
+ * El BFF de punta a punta, con su cliente HTTP real contra los servicios de
+ * Plaza falsos y un Keycloak falso que firma los tokens. Prueba lo que es del
+ * BFF: el token, la saga y sus compensaciones, y que el error de un servicio
+ * llega al cliente con su forma.
  *
- * Prueba lo único que hay el primer día, que igual es lo que más cuesta cuando
- * se rompe: que el módulo levanta, que las sondas contestan donde el
- * balanceador las busca y que el documento OpenAPI se puede generar. Un
- * despliegue muere por una sonda movida mucho antes que por una regla de
- * negocio.
+ * El test no pasa por `bootstrap()`, así que monta el `ValidationPipe` de Nova
+ * y la documentación, que es lo que `bootstrap()` pone.
  */
 describe('PlazaBff', () => {
+  const plaza = new FakePlaza();
   let app: INestApplication;
+  let http: App;
+  let ana: string;
 
   beforeAll(async () => {
+    await plaza.start();
+    for (const service of ['CATALOG', 'ORDERS', 'PAYMENTS']) {
+      process.env[`${service}_URL`] = plaza.url;
+    }
+    process.env['KEYCLOAK_ISSUER'] = plaza.issuer;
+
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
-
     app = moduleRef.createNestApplication();
-
-    // El test no pasa por `bootstrap()`, así que la documentación se monta acá.
-    // Vale la pena: generar el documento recorre los decoradores de todos los
-    // controladores, y un `@ApiProperty` mal puesto revienta ahí y no en la
-    // primera visita a /docs.
-    setupOpenApi(app, { title: 'PlazaBff', bearerAuth: false });
-
+    app.useGlobalPipes(
+      new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: true,
+        transform: true,
+        exceptionFactory: validationExceptionFactory,
+      }),
+    );
+    setupOpenApi(app, { title: 'PlazaBff', bearerAuth: true });
     await app.init();
+    http = app.getHttpServer() as App;
+    ana = await plaza.token('ana');
   });
 
   afterAll(async () => {
-    await app.close();
+    await app?.close();
+    await plaza.stop();
   });
 
-  // Vive y disponible no son lo mismo: la primera dice que el proceso responde,
-  // la segunda que puede atender. Si `live` mirara dependencias, el orquestador
-  // reiniciaría el contenedor por una caída que no es suya.
-  it('answers the liveness probe without touching dependencies', async () => {
-    const response = await request(app.getHttpServer() as App)
-      .get('/health/live')
-      .expect(200);
-
-    expect(response.body).toMatchObject({ status: 'ok' });
+  beforeEach(() => {
+    plaza.calls.length = 0;
   });
 
-  it('answers the readiness probe', async () => {
-    const response = await request(app.getHttpServer() as App)
-      .get('/health/ready')
-      .expect(200);
+  const purchase = (items: unknown, key = 'purchase-1') =>
+    request(http)
+      .post('/purchases')
+      .set('Authorization', `Bearer ${ana}`)
+      .set('Idempotency-Key', key)
+      .send({ items });
 
-    expect(response.body).toMatchObject({ status: 'ok' });
+  it('answers both probes without a token', async () => {
+    await request(http).get('/health/live').expect(200);
+    await request(http).get('/health/ready').expect(200);
   });
 
-  // Las sondas quedan fuera del prefijo global a propósito: moverlas es mover
-  // el target group, y una sonda que responde 404 desregistra la tarea unos
-  // nueve segundos después de registrarla.
-  it('keeps the probes outside the global prefix', async () => {
-    await request(app.getHttpServer() as App)
-      .get('/api/v1/health/live')
-      .expect(404);
+  it('shows the catalog to anyone', async () => {
+    const page = await request(http).get('/products?limit=1').expect(200);
+
+    expect(page.body).toMatchObject({
+      success: true,
+      data: { items: [{ sku: 'MUG-001' }], nextCursor: 'next', hasNext: true },
+    });
+    const missing = await request(http).get('/products/NOPE-000').expect(404);
+    expect(missing.body.errors[0].code).toBe('PRODUCT_NOT_FOUND');
   });
 
-  it('serves an OpenAPI document', async () => {
-    const response = await request(app.getHttpServer() as App)
-      .get('/docs/json')
-      .expect(200);
+  it('asks for a valid token for everything else', async () => {
+    await request(http).get('/orders').expect(401);
+    await request(http)
+      .get('/orders')
+      .set('Authorization', 'Bearer not-a-token')
+      .expect(401);
+  });
+
+  it('buys: reserves, places, pays and confirms, as the customer of the token', async () => {
+    const bought = await purchase([{ sku: 'MUG-001', quantity: 2 }]).expect(
+      201,
+    );
+
+    expect(bought.body).toMatchObject({
+      success: true,
+      data: {
+        orderId: 'order-1',
+        paymentId: 'payment-1',
+        status: 'CONFIRMED',
+        total: 51,
+        currency: 'PEN',
+        items: [{ sku: 'MUG-001', quantity: 2, unitPrice: 25.5 }],
+      },
+    });
+    expect(plaza.routes()).toEqual([
+      'POST /v1/reservations',
+      'POST /v1/orders',
+      'POST /v1/payments',
+      'POST /v1/reservations/reservation-1/confirm',
+      'POST /v1/orders/order-1/confirm',
+    ]);
+    // El cliente sale del token, y viaja solo a cada servicio.
+    expect(new Set(plaza.calls.map((call) => call.customer))).toEqual(
+      new Set(['ana']),
+    );
+  });
+
+  it('without stock answers the 409 of the catalog and does nothing else', async () => {
+    const response = await purchase([{ sku: 'HOOD-008', quantity: 4 }]).expect(
+      409,
+    );
 
     expect(response.body).toMatchObject({
-      info: { title: 'PlazaBff' },
+      success: false,
+      errors: [{ code: 'OUT_OF_STOCK' }],
     });
+    expect(plaza.routes()).toEqual(['POST /v1/reservations']);
   });
 
-  // Que el documento se sirva no alcanza: un DTO declarado como `type` no deja
-  // metadatos y el endpoint sale sin esquema, con el documento igual de verde.
-  // Esto mira que la respuesta esté descrita como el sobre envolviendo al DTO,
-  // que es lo que sale por el cable.
-  it('describes the response as the envelope wrapping the dto', async () => {
-    const response = await request(app.getHttpServer() as App).get(
-      '/docs/json',
+  it('a declined payment cancels the order and releases the stock', async () => {
+    const response = await purchase([{ sku: 'LAMP-009', quantity: 2 }]).expect(
+      422,
     );
+
+    expect(response.body.errors[0].code).toBe('PAYMENT_DECLINED');
+    expect(plaza.routes()).toEqual([
+      'POST /v1/reservations',
+      'POST /v1/orders',
+      'POST /v1/payments',
+      'POST /v1/orders/order-1/cancel',
+      'POST /v1/reservations/reservation-1/release',
+    ]);
+  });
+
+  it('a purchase needs its key and at least one valid item', async () => {
+    await request(http)
+      .post('/purchases')
+      .set('Authorization', `Bearer ${ana}`)
+      .send({ items: [{ sku: 'MUG-001', quantity: 1 }] })
+      .expect(400);
+    await purchase([]).expect(400);
+    await purchase([{ sku: 'MUG-001', quantity: 0 }]).expect(400);
+    expect(plaza.calls).toEqual([]);
+  });
+
+  it('lists the orders of the customer', async () => {
+    const page = await request(http)
+      .get('/orders')
+      .set('Authorization', `Bearer ${ana}`)
+      .expect(200);
+
+    expect(page.body.data).toMatchObject({
+      items: [{ id: 'order-1' }],
+      hasNext: false,
+    });
+    expect(plaza.calls).toEqual([{ route: 'GET /v1/orders', customer: 'ana' }]);
+  });
+
+  it('serves an OpenAPI document with the envelope around the dto', async () => {
+    const response = await request(http).get('/docs/json').expect(200);
     const document = response.body as {
       components: { schemas: Record<string, unknown> };
       paths: Record<string, unknown>;
     };
 
-    expect(document.components.schemas).toHaveProperty('PurchasesResponse');
+    expect(document.components.schemas).toHaveProperty('PurchaseResponse');
     expect(JSON.stringify(document.paths)).toContain(
       '#/components/schemas/ApiEnvelopeSchema',
-    );
-    expect(JSON.stringify(document.paths)).toContain(
-      '#/components/schemas/PurchasesResponse',
     );
   });
 });
