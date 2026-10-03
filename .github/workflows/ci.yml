@@ -100,7 +100,7 @@ jobs:
           # arranque; la sonda `live` no llama a ninguno.
           id=$(docker run --detach --env NODE_ENV=development --env PORT=3000 \
             --env CATALOG_URL=http://localhost:8082 --env ORDERS_URL=http://localhost:8081 \
-            --env PAYMENTS_URL=http://localhost:8083 --env KEYCLOAK_ISSUER=http://localhost:8180/realms/plaza \
+            --env PAYMENTS_URL=http://localhost:8083 --env AUDIT_URL=http://localhost:8085 --env KEYCLOAK_ISSUER=http://localhost:8180/realms/plaza \
             --publish 3000:3000 "plaza-bff:ci")
           trap 'docker rm --force "$id" > /dev/null 2>&1 || true' EXIT
 

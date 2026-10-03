@@ -4,7 +4,7 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
-import { FakePlaza } from './fake-plaza';
+import { FakePlaza, OWNED_ORDER } from './fake-plaza';
 
 /**
  * El BFF de punta a punta, con su cliente HTTP real contra los servicios de
@@ -23,7 +23,7 @@ describe('PlazaBff', () => {
 
   beforeAll(async () => {
     await plaza.start();
-    for (const service of ['CATALOG', 'ORDERS', 'PAYMENTS']) {
+    for (const service of ['CATALOG', 'ORDERS', 'PAYMENTS', 'AUDIT']) {
       process.env[`${service}_URL`] = plaza.url;
     }
     process.env['KEYCLOAK_ISSUER'] = plaza.issuer;
@@ -164,6 +164,49 @@ describe('PlazaBff', () => {
       hasNext: false,
     });
     expect(plaza.calls).toEqual([{ route: 'GET /v1/orders', customer: 'ana' }]);
+  });
+
+  it('shows the best sellers to anyone and validates the limit before calling', async () => {
+    const ranking = await request(http)
+      .get('/products/best-sellers')
+      .query({ limit: 2 })
+      .expect(200);
+
+    expect(ranking.body.data).toEqual([
+      { sku: 'MUG-001', name: 'Taza de cerámica', unitsSold: 12 },
+      { sku: 'TEE-002', name: 'Polo', unitsSold: 7 },
+    ]);
+    await request(http)
+      .get('/products/best-sellers')
+      .query({ limit: 51 })
+      .expect(400);
+    expect(plaza.routes()).toEqual(['GET /v1/products/best-sellers']);
+  });
+
+  it('shows the history of an order only after finding it as the customer of the token', async () => {
+    const history = await request(http)
+      .get(`/orders/${OWNED_ORDER}/history`)
+      .set('Authorization', `Bearer ${ana}`)
+      .expect(200);
+
+    expect(history.body.data).toMatchObject([
+      { id: 'event-1', type: 'pe.edu.nova.plaza.order.created.v1' },
+      { id: 'event-2', type: 'pe.edu.nova.plaza.order.confirmed.v1' },
+    ]);
+    expect(plaza.calls).toEqual([
+      { route: `GET /v1/orders/${OWNED_ORDER}`, customer: 'ana' },
+      { route: `GET /v1/orders/${OWNED_ORDER}/events`, customer: 'ana' },
+    ]);
+
+    plaza.calls.length = 0;
+    const someoneElses = '9a1c1d2e-3b4a-4c5d-8e6f-7a8b9c0d1e2f';
+    const missing = await request(http)
+      .get(`/orders/${someoneElses}/history`)
+      .set('Authorization', `Bearer ${ana}`)
+      .expect(404);
+
+    expect(missing.body.errors[0].code).toBe('ORDER_NOT_FOUND');
+    expect(plaza.routes()).toEqual([`GET /v1/orders/${someoneElses}`]);
   });
 
   it('serves an OpenAPI document with the envelope around the dto', async () => {

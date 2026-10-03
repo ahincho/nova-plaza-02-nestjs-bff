@@ -78,11 +78,11 @@ feature desde un upstream.
 ## Correrlo en local
 
 Levantar Postgres, Vault y Keycloak desde
-[`nova-plaza-01-shared-platform`](https://github.com/ahincho/nova-plaza-01-shared-platform), los tres servicios, y
+[`nova-plaza-01-shared-platform`](https://github.com/ahincho/nova-plaza-01-shared-platform), los cuatro servicios, y
 después:
 
 ```bash
-export CATALOG_URL=http://localhost:8082 ORDERS_URL=http://localhost:8081 PAYMENTS_URL=http://localhost:8083
+export CATALOG_URL=http://localhost:8082 ORDERS_URL=http://localhost:8081 PAYMENTS_URL=http://localhost:8083 AUDIT_URL=http://localhost:8085
 export KEYCLOAK_ISSUER=http://localhost:8180/realms/plaza
 pnpm install && pnpm start:dev
 ```
@@ -103,12 +103,12 @@ curl -s -X POST http://localhost:8080/v1/purchases -H "Authorization: Bearer $TO
 pnpm verify
 ```
 
-| Prueba                      | Qué cubre                                                                                                                                                   |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `purchases.service.spec.ts` | la saga: el orden de los pasos y de cada compensación, y que una compensación que falla no tapa el error                                                    |
-| `upstream-errors.spec.ts`   | qué error de un servicio llega al cliente con su forma                                                                                                      |
-| `keycloak.spec.ts`          | el token: válido, de otro emisor, mal firmado y sin emisor configurado                                                                                      |
-| `test/app.e2e-spec.ts`      | el BFF entero contra los tres servicios y un Keycloak falsos por HTTP: el token, la compra, el 409 sin stock, el 422 con su compensación y la documentación |
+| Prueba                      | Qué cubre                                                                                                                                                                                           |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `purchases.service.spec.ts` | la saga: el orden de los pasos y de cada compensación, y que una compensación que falla no tapa el error                                                                                            |
+| `upstream-errors.spec.ts`   | qué error de un servicio llega al cliente con su forma                                                                                                                                              |
+| `keycloak.spec.ts`          | el token: válido, de otro emisor, mal firmado y sin emisor configurado                                                                                                                              |
+| `test/app.e2e-spec.ts`      | el BFF entero contra los cuatro servicios y un Keycloak falsos por HTTP: el token, la compra, el ranking, la historia de un pedido, el 409 sin stock, el 422 con su compensación y la documentación |
 
 ## Licencia
 

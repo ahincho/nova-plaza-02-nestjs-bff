@@ -1,6 +1,11 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiEnvelope, ApiErrors, Public } from '@ahincho/nova-nestjs';
 import { CatalogClient } from '../../upstream/catalog/catalog.client';
+import {
+  BestSellerResponse,
+  toBestSellerResponse,
+} from './dto/best-seller.response';
+import { BestSellersQuery } from './dto/best-sellers.query';
 import { CursorQuery } from './dto/cursor.query';
 import {
   ProductPageResponse,
@@ -27,6 +32,20 @@ export class ProductsController {
       nextCursor: page.nextCursor,
       hasNext: page.hasNext,
     };
+  }
+
+  // Antes de ':sku', para que `best-sellers` no se lea como un código.
+  @Get('best-sellers')
+  @ApiEnvelope(BestSellerResponse, {
+    isArray: true,
+    description: 'Lo más vendido, de más a menos unidades',
+  })
+  @ApiErrors(400)
+  async bestSellers(
+    @Query() query: BestSellersQuery,
+  ): Promise<BestSellerResponse[]> {
+    const ranking = await this.catalog.bestSellers(query.limit);
+    return ranking.map(toBestSellerResponse);
   }
 
   @Get(':sku')

@@ -2,6 +2,9 @@ import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { exportJWK, generateKeyPair, SignJWT } from 'jose';
 
+/** El pedido de ana que tiene historia en la auditoría; cualquier otro uuid no existe. */
+export const OWNED_ORDER = '3f1c1d2e-3b4a-4c5d-8e6f-7a8b9c0d1e2f';
+
 /** Una llamada que recibió un servicio falso, con el cliente que traía. */
 export type Call = { readonly route: string; readonly customer?: string };
 
@@ -90,6 +93,12 @@ export class FakePlaza {
         hasNext: true,
       });
     }
+    if (route === 'GET /v1/products/best-sellers') {
+      return ok([
+        { sku: 'MUG-001', name: 'Taza de cerámica', unitsSold: 12 },
+        { sku: 'TEE-002', name: 'Polo', unitsSold: 7 },
+      ]);
+    }
     if (route === 'GET /v1/products/NOPE-000') {
       return failure(
         404,
@@ -120,6 +129,31 @@ export class FakePlaza {
     }
     if (route === 'POST /v1/orders/order-1/cancel') {
       return ok(order(this.placed, 'CANCELLED'));
+    }
+    if (route === `GET /v1/orders/${OWNED_ORDER}`) {
+      return ok({ ...order({}, 'CONFIRMED'), id: OWNED_ORDER });
+    }
+    if (route === `GET /v1/orders/${OWNED_ORDER}/events`) {
+      return ok([
+        {
+          id: 'event-1',
+          type: 'pe.edu.nova.plaza.order.created.v1',
+          time: '2026-10-02T15:00:00Z',
+          traceparent: null,
+          data: { orderId: OWNED_ORDER },
+        },
+        {
+          id: 'event-2',
+          type: 'pe.edu.nova.plaza.order.confirmed.v1',
+          time: '2026-10-02T15:00:01Z',
+          traceparent:
+            '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01',
+          data: { orderId: OWNED_ORDER },
+        },
+      ]);
+    }
+    if (/^GET \/v1\/orders\/[0-9a-f-]{36}$/.test(route)) {
+      return failure(404, 'ORDER_NOT_FOUND', 'El pedido no existe');
     }
     if (route === 'GET /v1/orders') {
       return ok({

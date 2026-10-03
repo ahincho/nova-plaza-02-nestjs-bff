@@ -20,6 +20,13 @@ export type CatalogPage<T> = {
   readonly hasNext: boolean;
 };
 
+/** Un producto del ranking de lo más vendido. */
+export type BestSeller = {
+  readonly sku: string;
+  readonly name: string;
+  readonly unitsSold: number;
+};
+
 /** El stock apartado para una compra, con los precios del momento. */
 export type Reservation = {
   readonly id: string;
@@ -56,6 +63,16 @@ export class CatalogClient {
       this.http.get<Envelope<CatalogPage<CatalogProduct>>>(
         `${this.config.url}/v1/products`,
         { query: { limit, cursor }, ...this.options() },
+      ),
+    );
+  }
+
+  /** Lo más vendido, que el catálogo lleva con los pedidos confirmados. */
+  async bestSellers(limit?: number): Promise<BestSeller[]> {
+    return this.call(() =>
+      this.http.get<Envelope<BestSeller[]>>(
+        `${this.config.url}/v1/products/best-sellers`,
+        { query: { limit }, ...this.options() },
       ),
     );
   }

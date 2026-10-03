@@ -4,6 +4,7 @@ import { keycloakVerifier } from './auth/keycloak';
 import { OrdersModule } from './features/orders/orders.module';
 import { ProductsModule } from './features/products/products.module';
 import { PurchasesModule } from './features/purchases/purchases.module';
+import { audit } from './upstream/audit/audit.config';
 import { catalog } from './upstream/catalog/catalog.config';
 import { orders } from './upstream/orders/orders.config';
 import { payments } from './upstream/payments/payments.config';
@@ -11,9 +12,9 @@ import { payments } from './upstream/payments/payments.config';
 @Module({
   imports: [
     NovaModule.forRoot({
-      // Los tres servicios de Plaza. Si falta la URL de uno, el BFF no arranca
+      // Los cuatro servicios de Plaza. Si falta la URL de uno, el BFF no arranca
       // y el error la nombra, en vez de responder 500 en la primera compra.
-      config: { load: [catalog, orders, payments] },
+      config: { load: [catalog, orders, payments, audit] },
 
       // El BFF es el único que valida el token (ADR-043): la firma contra el
       // JWKS de Keycloak, el emisor y el vencimiento. Todo lo que no es
